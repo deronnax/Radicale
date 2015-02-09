@@ -48,9 +48,9 @@ def serialize(tag, headers=(), items=()):
         lines = ["BEGIN:%s" % tag]
         for part in (headers, items):
             if part:
-                lines.append("\n".join(item.text for item in part))
-        lines.append("END:%s\n" % tag)
-    return "\n".join(lines)
+                lines.append("\r\n".join(item.text for item in part))
+        lines.append("END:%s\r\n" % tag)
+    return "\r\n".join(lines)
 
 
 def unfold(text):
