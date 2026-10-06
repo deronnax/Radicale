@@ -3146,6 +3146,35 @@ Here are the steps to install Radicale via Docker Compose:
     $ docker compose down
     ```
 
+##### Environment variables for a default user
+
+The official Docker image can create an `htpasswd` user on first startup when
+no users file exists yet. This is intended for quick self-hosted setups; for
+production, mount a configuration file and users file instead.
+
+| Variable | Description |
+| --- | --- |
+| `RADICALE_USER` | Login name for the default user |
+| `RADICALE_PASSWORD` or `RADICALE_PASS` | Password for that user |
+| `RADICALE_HTPASSWD_FILENAME` | Optional path to the users file (default: `/etc/radicale/users`) |
+
+If `RADICALE_USER` and a password variable are set and the users file does not
+exist yet, the entrypoint creates it with a bcrypt hash. If
+`/etc/radicale/config` is also missing, a minimal configuration is written that
+enables `htpasswd` authentication. Existing users or configuration files are
+left unchanged.
+
+Example:
+
+```yaml
+environment:
+  RADICALE_USER: admin
+  RADICALE_PASSWORD: change-me
+```
+
+Mount persistent volumes for `/etc/radicale` and `/var/lib/radicale` so users,
+configuration, and calendar data survive container recreation.
+
 ##### Available tags
 
 * `stable`: Points to the latest stable release. This is recommended for most users.
