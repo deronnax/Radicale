@@ -20,10 +20,12 @@ Radicale tests related to sharing.
 
 """
 
+import csv
 import datetime
 import json
 import logging
 import os
+import pickle
 import re
 import sys
 import tempfile
@@ -38,6 +40,12 @@ from radicale import pathutils, sharing, storage, xmlutils
 from radicale.item import Item
 from radicale.tests import BaseTest
 from radicale.tests.helpers import get_file_content
+
+
+def _supported_report_name(supported):
+    report = supported.find(xmlutils.make_clark("D:report"))
+    assert report is not None
+    return xmlutils.make_human_tag(list(report)[0].tag)
 
 
 class TestSharingApiSanity(BaseTest):
@@ -662,6 +670,9 @@ class TestSharingApiSanity(BaseTest):
             assert path_base1 in answer
             assert path_base2 in answer
 
+            logging.info("\n*** delete collection of #1 (fail, still in use)")
+            self.delete(path_base1, login="owner:ownerpw", check=409)
+
             logging.info("\n*** delete token#1 (form->text)")
             form_array = ["PathOrToken=" + token1]
             _, headers, answer = self._sharing_api_form("token", "delete", check=200, login="owner:ownerpw", form_array=form_array)
@@ -737,6 +748,9 @@ class TestSharingApiSanity(BaseTest):
             assert answer_dict['Lines'] == 1
             assert answer_dict['Content'][0]['HiddenByOwner'] is False
 
+            logging.info("\n*** delete collection of #2 (fail, still in use)")
+            self.delete(path_base2, login="owner:ownerpw", check=409)
+
             logging.info("\n*** delete token#2 (json->json)")
             json_dict = {}
             json_dict['PathOrToken'] = token2
@@ -752,7 +766,7 @@ class TestSharingApiSanity(BaseTest):
             assert answer_dict['Status'] == "not-found"
             assert answer_dict['Lines'] == 0
 
-            logging.info("\n*** delete collection*")
+            logging.info("\n*** delete collection")
             self.delete(path_base1, login="owner:ownerpw")
             self.delete(path_base2, login="owner:ownerpw")
 
@@ -1527,18 +1541,18 @@ class TestSharingApiSanity(BaseTest):
 
         json_dict: dict
 
-        path_shared = "/user/calendarUP-shared-by-owner.ics/"
-        path_shared2 = "/user/calendarUP-shared-by-owner2.ics/"
-        path_mapped = "/owner/calendarUP.ics/"
-        path_mapped2 = "/owner/calendarUP2.ics/"
-        path_mapped_o2 = "/owner2/calendarUP3.ics/"
-
-        logging.info("\n*** prepare and test access")
-        self.mkcalendar(path_mapped, login="owner:ownerpw")
-        self.mkcalendar(path_mapped2, login="owner:ownerpw")
-        self.mkcalendar(path_mapped_o2, login="owner2:owner2pw")
-
         for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            path_shared = "/user/calendarUP-shared-by-owner-" + db_type + ".ics/"
+            path_shared2 = "/user/calendarUP-shared-by-owner2-" + db_type + ".ics/"
+            path_mapped = "/owner/calendarUP-" + db_type + ".ics/"
+            path_mapped2 = "/owner/calendarUP2-" + db_type + ".ics/"
+            path_mapped_o2 = "/owner2/calendarUP3-" + db_type + ".ics/"
+
+            logging.info("\n*** prepare and test access")
+            self.mkcalendar(path_mapped, login="owner:ownerpw")
+            self.mkcalendar(path_mapped2, login="owner:ownerpw")
+            self.mkcalendar(path_mapped_o2, login="owner2:owner2pw")
+
             logging.info("\n*** test: %s", db_type)
             self.configure({"sharing": {"type": db_type}})
 
@@ -1696,23 +1710,23 @@ class TestSharingApiSanity(BaseTest):
 
         json_dict: dict
 
-        path_share1 = "/user1/calendar-shared-by-owner1.ics/"
-        path_mapped1 = "/owner1/calendar1.ics/"
-        path_share2 = "/user2/calendar-shared-by-owner2.ics/"
-        path_mapped2 = "/owner2/calendar2.ics/"
-
-        logging.info("\n*** prepare")
-        self.mkcalendar(path_mapped1, login="%s:%s" % ("owner1", "owner1pw"))
-        event = get_file_content("event1.ics")
-        path = path_mapped1 + "/event1.ics"
-        self.put(path, event, login="%s:%s" % ("owner1", "owner1pw"))
-
-        self.mkcalendar(path_mapped2, login="%s:%s" % ("owner2", "owner2pw"))
-        event = get_file_content("event1.ics")
-        path = path_mapped2 + "/event1.ics"
-        self.put(path, event, login="%s:%s" % ("owner2", "owner2pw"))
-
         for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            path_share1 = "/user1/calendar-shared-by-owner1-" + db_type + ".ics/"
+            path_mapped1 = "/owner1/calendar1-" + db_type + ".ics/"
+            path_share2 = "/user2/calendar-shared-by-owner2-" + db_type + ".ics/"
+            path_mapped2 = "/owner2/calendar2-" + db_type + ".ics/"
+
+            logging.info("\n*** prepare")
+            self.mkcalendar(path_mapped1, login="%s:%s" % ("owner1", "owner1pw"))
+            event = get_file_content("event1.ics")
+            path = path_mapped1 + "/event1.ics"
+            self.put(path, event, login="%s:%s" % ("owner1", "owner1pw"))
+
+            self.mkcalendar(path_mapped2, login="%s:%s" % ("owner2", "owner2pw"))
+            event = get_file_content("event1.ics")
+            path = path_mapped2 + "/event1.ics"
+            self.put(path, event, login="%s:%s" % ("owner2", "owner2pw"))
+
             logging.info("\n*** test: %s", db_type)
             self.configure({"sharing": {"type": db_type}})
 
@@ -1788,18 +1802,18 @@ class TestSharingApiSanity(BaseTest):
 
         json_dict: dict
 
-        path_shared_r = "/user/calendar-shared-by-owner-r.ics/"
-        path_shared_w = "/user1/calendar-shared-by-owner-w.ics/"
-        path_shared_rw = "/user2/calendar-shared-by-owner-rw.ics/"
-        path_mapped = "/owner/calendar.ics/"
-
-        logging.info("\n*** prepare and test access")
-        self.mkcalendar(path_mapped, login="owner:ownerpw")
-        event = get_file_content("event1.ics")
-        path = path_mapped + "/event1.ics"
-        self.put(path, event, login="owner:ownerpw")
-
         for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            path_shared_r = "/user/calendar-shared-by-owner-r-" + db_type + ".ics/"
+            path_shared_w = "/user1/calendar-shared-by-owner-w-" + db_type + ".ics/"
+            path_shared_rw = "/user2/calendar-shared-by-owner-rw-" + db_type + ".ics/"
+            path_mapped = "/owner/calendar-" + db_type + ".ics/"
+
+            logging.info("\n*** prepare and test access")
+            self.mkcalendar(path_mapped, login="owner:ownerpw")
+            event = get_file_content("event1.ics")
+            path = path_mapped + "/event1.ics"
+            self.put(path, event, login="owner:ownerpw")
+
             logging.info("\n*** test: %s", db_type)
             self.configure({"sharing": {"type": db_type}})
 
@@ -1965,6 +1979,424 @@ class TestSharingApiSanity(BaseTest):
 
             logging.info("\n*** fetch event as owner -> fail")
             _, headers, answer = self.request("GET", path_mapped + "event3.ics", check=404, login="owner:ownerpw")
+
+            # DELETE collection
+            logging.info("\n*** delete collection by user1 via map:w -> fail")
+            _, responses = self.delete(path_shared_rw, check=403, login="user2:user2pw")
+
+            logging.info("\n*** delete collection by owner -> fail (still in use)")
+            _, responses = self.delete(path_mapped, check=409, login="owner:ownerpw")
+
+            logging.info("\n*** delete map user/owner:r -> ok")
+            json_dict = {}
+            json_dict['PathMapped'] = path_mapped
+            json_dict['PathOrToken'] = path_shared_r
+            _, headers, answer = self._sharing_api_json("map", "delete", check=200, login="owner:ownerpw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] == "success"
+
+            logging.info("\n*** delete map user1/owner:w -> ok")
+            json_dict = {}
+            json_dict['PathMapped'] = path_mapped
+            json_dict['PathOrToken'] = path_shared_w
+            _, headers, answer = self._sharing_api_json("map", "delete", check=200, login="owner:ownerpw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] == "success"
+
+            logging.info("\n*** delete map user2/owner:rw -> ok")
+            json_dict = {}
+            json_dict['PathMapped'] = path_mapped
+            json_dict['PathOrToken'] = path_shared_rw
+            _, headers, answer = self._sharing_api_json("map", "delete", check=200, login="owner:ownerpw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] == "success"
+
+            logging.info("\n*** delete collection by owner -> ok (no longer in use)")
+            _, responses = self.delete(path_mapped, check=200, login="owner:ownerpw")
+
+    def test_sharing_api_token_freebusy(self) -> None:
+        """share-by-token reads free-busy, and view=freebusy skips the query."""
+        self.configure({"auth": {"type": "htpasswd",
+                                 "htpasswd_filename": self.htpasswd_file_path,
+                                 "htpasswd_encryption": "plain"},
+                        "sharing": {
+                                    "type": "csv",
+                                    "permit_create_map": True,
+                                    "permit_create_token": True,
+                                    "collection_by_map": "True",
+                                    "collection_by_token": "True"},
+                        "rights": {"type": "owner_only"}})
+        path_cal = "/owner/cal-token-fb/"
+        path_book = "/owner/book-token-fb/"
+        path_shared = "/user/cal-token-fb/"
+        self.mkcalendar(path_cal, login="owner:ownerpw")
+        self.create_addressbook(path_book, login="owner:ownerpw")
+        event = """\
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Radicale//EN
+BEGIN:VEVENT
+UID:hidden-secret
+SUMMARY:Hidden title
+DESCRIPTION:Hidden details
+DTSTART:20130901T160000Z
+DTEND:20130901T170000Z
+END:VEVENT
+END:VCALENDAR
+"""
+        card = """\
+BEGIN:VCARD
+VERSION:3.0
+UID:contact-secret
+FN:Hidden Person
+N:Person;Hidden;;;
+END:VCARD
+"""
+        self.put(path_cal + "event.ics", event, login="owner:ownerpw")
+        self.put(path_book + "contact.vcf", card, login="owner:ownerpw")
+        inside = datetime.datetime.now(datetime.timezone.utc).replace(
+            hour=12, minute=0, second=0, microsecond=0)
+        inside_end = inside + datetime.timedelta(hours=1)
+        inside_start_text = inside.strftime("%Y%m%dT%H%M%SZ")
+        inside_end_text = inside_end.strftime("%Y%m%dT%H%M%SZ")
+        inside_event = """\
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Radicale//EN
+BEGIN:VEVENT
+UID:inside-secret
+SUMMARY:Inside secret
+DTSTART:%s
+DTEND:%s
+END:VEVENT
+END:VCALENDAR
+""" % (inside_start_text, inside_end_text)
+        self.put(path_cal + "inside.ics", inside_event, login="owner:ownerpw")
+        busy = "FREEBUSY;FBTYPE=BUSY:20130901T160000Z/20130901T170000Z"
+        inside_busy = "FREEBUSY;FBTYPE=BUSY:%s/%s" % (
+            inside_start_text, inside_end_text)
+        window = "start=20130901T000000Z&end=20130902T000000Z"
+        event_secrets = ("Hidden title", "Hidden details", "hidden-secret",
+                         "Inside secret", "inside-secret",
+                         "SUMMARY", "UID", "BEGIN:VEVENT")
+        freebusy_query = """\
+<?xml version="1.0" encoding="utf-8" ?>
+<C:free-busy-query xmlns:C="urn:ietf:params:xml:ns:caldav">
+    <C:time-range start="20130901T000000Z" end="20130902T000000Z"/>
+</C:free-busy-query>"""
+        calendar_query = """\
+<?xml version="1.0" encoding="utf-8" ?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+    <D:prop>
+        <D:getetag />
+        <C:calendar-data />
+    </D:prop>
+    <C:filter>
+        <C:comp-filter name="VCALENDAR">
+            <C:comp-filter name="VEVENT" />
+        </C:comp-filter>
+    </C:filter>
+</C:calendar-query>"""
+
+        def assert_freebusy(answer: str, headers: Union[dict, None] = None,
+                            period: str = busy) -> None:
+            if headers is not None:
+                assert headers["Content-Type"].startswith("text/calendar")
+                assert "-freebusy.ics" in headers["Content-Disposition"]
+            assert answer.count("BEGIN:VFREEBUSY") == 1
+            assert period in answer
+            for secret in event_secrets:
+                assert secret not in answer
+
+        def make_token(permissions: str, actions: Union[dict, None] = None,
+                       path: str = path_cal) -> str:
+            json_dict: dict = {
+                "PathMapped": path,
+                "Permissions": permissions,
+                "Enabled": True,
+            }
+            if actions is not None:
+                json_dict["Actions"] = actions
+            _, _headers, answer = self._sharing_api_json(
+                "token", "create", check=200, login="owner:ownerpw",
+                json_dict=json_dict)
+            parsed = json.loads(answer)
+            assert parsed["Status"] == "success"
+            return parsed["PathOrToken"]
+
+        for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            logging.info("\n*** test: %s", db_type)
+            self.configure({"sharing": {"type": db_type}})
+
+            _, _headers, answer = self._sharing_api_json(
+                "all", "info", check=200, login="owner:ownerpw", json_dict={})
+            assert json.loads(answer)["SupportedActions"]["config"]["view"] == "str"
+
+            _, _headers, answer = self._sharing_api_json(
+                "token", "create", check=400, login="owner:ownerpw", json_dict={
+                    "PathMapped": path_cal,
+                    "Permissions": "f",
+                    "Enabled": True,
+                    "Actions": {"config": {"view": "calendar"}}})
+            assert "hidden-secret" not in answer
+
+            token_f = make_token("f")
+            _status, _headers, answer = self.request("GET", token_f, check=403)
+            for secret in event_secrets:
+                assert secret not in answer
+            _status, headers, answer = self.request(
+                "GET", token_f, check=200,
+                QUERY_STRING="view=freebusy&" + window)
+            assert_freebusy(answer, headers)
+            _status, headers, answer = self.request(
+                "HEAD", token_f, check=200,
+                QUERY_STRING="view=freebusy&" + window)
+            assert answer == ""
+            assert headers["Content-Type"].startswith("text/calendar")
+            assert headers["ETag"].startswith('"') and headers["ETag"].endswith('"')
+            _status, _headers, answer = self.request(
+                "GET", token_f + "event.ics", check=403,
+                QUERY_STRING="view=freebusy&" + window)
+            for secret in event_secrets:
+                assert secret not in answer
+            _status, headers, answer = self.request(
+                "REPORT", token_f, freebusy_query, check=200)
+            assert headers["Content-Type"].startswith("text/calendar")
+            assert busy in answer
+            for secret in event_secrets:
+                assert secret not in answer
+            _status, _headers, answer = self.request(
+                "REPORT", token_f, calendar_query, check=403)
+            for secret in event_secrets:
+                assert secret not in answer
+            self.put(token_f + "new.ics", event, check=403)
+            self.get(path_cal + "new.ics", check=404, login="owner:ownerpw")
+
+            token_read = make_token("rp")
+            _status, _headers, answer = self.request("GET", token_read, check=200)
+            assert "Hidden title" in answer
+            assert "hidden-secret" in answer
+
+            token_view = make_token("rp", {"config": {"view": "freebusy"}})
+            _status, headers, answer = self.request("GET", token_view, check=200)
+            assert_freebusy(answer, headers, inside_busy)
+            assert busy not in answer
+            _status, headers, answer = self.request("HEAD", token_view, check=200)
+            assert answer == ""
+            assert headers["Content-Type"].startswith("text/calendar")
+            assert "Last-Modified" not in headers
+            _status, headers, answer = self.request(
+                "GET", token_view, check=200, QUERY_STRING=window)
+            assert_freebusy(answer, headers)
+            _status, headers, answer = self.request(
+                "GET", token_view, check=200,
+                QUERY_STRING="view=freebusy&" + window)
+            assert_freebusy(answer, headers)
+            _status, _headers, answer = self.request(
+                "GET", token_view, check=400, QUERY_STRING="view=other")
+            for secret in event_secrets:
+                assert secret not in answer
+            _status, _headers, answer = self.request(
+                "GET", token_view + "event.ics", check=403)
+            for secret in event_secrets:
+                assert secret not in answer
+            self.request(
+                "PUT", token_view + "new.ics", event, check=405,
+                QUERY_STRING="view=freebusy")
+            self.put(token_view + "new.ics", event, check=403)
+            self.get(path_cal + "new.ics", check=404, login="owner:ownerpw")
+            _status, _headers, answer = self.request(
+                "REPORT", token_view, calendar_query, check=207)
+            assert "Hidden title" in answer
+            _status, answer = self.get(path_cal, login="owner:ownerpw")
+            assert "Hidden title" in answer
+
+            _, _headers, answer = self._sharing_api_json(
+                "token", "update", check=200, login="owner:ownerpw", json_dict={
+                    "PathOrToken": token_view,
+                    "Actions": {"config": {"view": sharing.SHARING_ACTIONS_DELETE_VALUE}}})
+            assert json.loads(answer)["Status"] == "success"
+            _status, _headers, answer = self.request("GET", token_view, check=200)
+            assert "Hidden title" in answer
+
+            token_f_view = make_token("f", {"config": {"view": "freebusy"}})
+            _status, headers, answer = self.request("GET", token_f_view, check=200)
+            assert_freebusy(answer, headers, inside_busy)
+            assert busy not in answer
+
+            token_book = make_token(
+                "r", {"config": {"view": "freebusy"}}, path_book)
+            _status, _headers, answer = self.request("GET", token_book, check=403)
+            assert "Hidden Person" not in answer
+            assert "contact-secret" not in answer
+            assert "BEGIN:VCARD" not in answer
+
+            _, _headers, answer = self._sharing_api_json(
+                "map", "create", check=200, login="owner:ownerpw", json_dict={
+                    "User": "user",
+                    "PathMapped": path_cal,
+                    "PathOrToken": path_shared,
+                    "Permissions": "rp",
+                    "Enabled": True,
+                    "Hidden": False,
+                    "Actions": {"config": {"view": "freebusy"}}})
+            assert json.loads(answer)["Status"] == "success"
+            self._sharing_api_json(
+                "map", "enable", check=200, login="user:userpw",
+                json_dict={"PathOrToken": path_shared})
+            self._sharing_api_json(
+                "map", "unhide", check=200, login="user:userpw",
+                json_dict={"PathOrToken": path_shared})
+            _status, _headers, answer = self.request(
+                "GET", path_shared, check=200, login="user:userpw")
+            assert "Hidden title" in answer
+            assert "hidden-secret" in answer
+
+    def test_sharing_api_map_freebusy(self) -> None:
+        """An f share lists free-busy for calendars and not for address books."""
+        self.configure({"auth": {"type": "htpasswd",
+                                 "htpasswd_filename": self.htpasswd_file_path,
+                                 "htpasswd_encryption": "plain"},
+                        "sharing": {
+                                    "type": "csv",
+                                    "permit_create_map": True,
+                                    "collection_by_map": "True"},
+                        "rights": {"type": "owner_only"}})
+        path_cal = "/owner/cal-f/"
+        path_cal_shared = "/user/cal-f/"
+        path_wf = "/owner/cal-wf/"
+        path_wf_shared = "/user/cal-wf/"
+        path_book = "/owner/book-f/"
+        path_book_shared = "/user/book-f/"
+        self.mkcalendar(path_cal, login="owner:ownerpw")
+        self.mkcalendar(path_wf, login="owner:ownerpw")
+        self.create_addressbook(path_book, login="owner:ownerpw")
+        event = """\
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Radicale//EN
+BEGIN:VEVENT
+UID:hidden-secret
+SUMMARY:Hidden title
+DTSTART:20130901T160000Z
+DTEND:20130901T170000Z
+END:VEVENT
+END:VCALENDAR
+"""
+        card = """\
+BEGIN:VCARD
+VERSION:3.0
+UID:contact-secret
+FN:Hidden Person
+N:Person;Hidden;;;
+END:VCARD
+"""
+        self.put(path_cal + "event.ics", event, login="owner:ownerpw")
+        self.put(path_book + "contact.vcf", card, login="owner:ownerpw")
+        for path_mapped, path_shared, permissions in (
+                (path_cal, path_cal_shared, "f"),
+                (path_wf, path_wf_shared, "wf"),
+                (path_book, path_book_shared, "f")):
+            _, _headers, answer = self._sharing_api_json(
+                "map", "create", check=200, login="owner:ownerpw", json_dict={
+                    "User": "user",
+                    "PathMapped": path_mapped,
+                    "PathOrToken": path_shared,
+                    "Permissions": permissions,
+                    "Enabled": True,
+                    "Hidden": False})
+            assert json.loads(answer)["Status"] == "success"
+            self._sharing_api_json(
+                "map", "enable", check=200, login="user:userpw",
+                json_dict={"PathOrToken": path_shared})
+            self._sharing_api_json(
+                "map", "unhide", check=200, login="user:userpw",
+                json_dict={"PathOrToken": path_shared})
+
+        propfind_body = """\
+<?xml version="1.0" encoding="utf-8" ?>
+<D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+    <D:prop>
+        <D:current-user-privilege-set />
+        <D:supported-report-set />
+    </D:prop>
+</D:propfind>"""
+        _status, responses = self.propfind(
+            "/user/", propfind_body, login="user:userpw", HTTP_DEPTH="1")
+        assert path_cal_shared in responses
+        assert path_wf_shared in responses
+        assert path_book_shared in responses
+
+        def listed(path: str) -> tuple:
+            response = responses[path]
+            assert not isinstance(response, int)
+            status, privileges_prop = response["D:current-user-privilege-set"]
+            assert status == 200
+            privileges = [
+                xmlutils.make_human_tag(node.findall("*")[0].tag)
+                for node in privileges_prop.findall(xmlutils.make_clark("D:privilege"))]
+            status, reports_prop = response["D:supported-report-set"]
+            assert status == 200
+            reports = []
+            for supported in reports_prop.findall(xmlutils.make_clark("D:supported-report")):
+                reports.append(_supported_report_name(supported))
+            return privileges, reports
+
+        assert listed(path_cal_shared) == (
+            ["C:read-free-busy"], ["C:free-busy-query"])
+        assert listed(path_wf_shared) == (
+            ["C:read-free-busy", "D:write-content"], ["C:free-busy-query"])
+        assert listed(path_book_shared) == ([], [])
+
+        status, _headers, answer = self.request(
+            "GET", path_cal_shared, check=403, login="user:userpw")
+        assert "Hidden title" not in answer
+        assert "hidden-secret" not in answer
+        status, _headers, answer = self.request(
+            "PROPFIND", path_cal_shared, propfind_body, check=403,
+            login="user:userpw", HTTP_DEPTH="1")
+        assert "Hidden title" not in answer
+        assert path_cal + "event.ics" not in answer
+        self.propfind(path_book_shared, propfind_body, check=403, login="user:userpw")
+        _status, direct = self.propfind(
+            path_cal_shared, propfind_body, login="user:userpw")
+        response = direct[path_cal_shared]
+        assert not isinstance(response, int)
+        _status, privileges_prop = response["D:current-user-privilege-set"]
+        privileges = [
+            xmlutils.make_human_tag(node.findall("*")[0].tag)
+            for node in privileges_prop.findall(xmlutils.make_clark("D:privilege"))]
+        assert privileges == ["C:read-free-busy"]
+        self.put(path_cal_shared + "new.ics", event, check=403, login="user:userpw")
+        self.get(path_cal + "new.ics", check=404, login="owner:ownerpw")
+        status, _headers, answer = self.request(
+            "PROPFIND", "/user/", propfind_body, login="user:userpw",
+            HTTP_DEPTH="1", check=207)
+        assert "Hidden title" not in answer
+        assert "Hidden Person" not in answer
+        assert "contact-secret" not in answer
+
+        freebusy_query = """\
+<?xml version="1.0" encoding="utf-8" ?>
+<C:free-busy-query xmlns:C="urn:ietf:params:xml:ns:caldav">
+    <C:time-range start="20130901T000000Z" end="20130902T000000Z"/>
+</C:free-busy-query>"""
+        status, headers, answer = self.request(
+            "REPORT", path_cal_shared, freebusy_query, check=200, login="user:userpw")
+        assert headers["Content-Type"].startswith("text/calendar")
+        assert "FREEBUSY;FBTYPE=BUSY:20130901T160000Z/20130901T170000Z" in answer
+        assert "Hidden title" not in answer
+        assert "hidden-secret" not in answer
+        status, _headers, answer = self.request(
+            "REPORT", path_book_shared, freebusy_query, check=403, login="user:userpw")
+        assert "Hidden Person" not in answer
+        assert "BEGIN:VFREEBUSY" not in answer
+
+        self.put(path_wf_shared + "event.ics", event, login="user:userpw")
+        _status, responses = self.propfind(
+            path_wf_shared, propfind_body, login="user:userpw")
+        assert listed(path_wf_shared) == (
+            ["C:read-free-busy", "D:write-content"], ["C:free-busy-query"])
 
     def test_sharing_api_map_report_access(self) -> None:
         """share-by-map API usage tests related to report."""
@@ -2719,16 +3151,16 @@ class TestSharingApiSanity(BaseTest):
         form_array: Sequence[str]
         json_dict: dict
 
-        path_mapped1 = "/owner/calendar1U.ics/"
-        path_mapped2 = "/owner/calendar2U.ics/"
-        path_shared1 = "/user/calendar1U-shared-by-owner.ics/"
-
-        logging.info("\n*** prepare and test access")
-        self.mkcalendar(path_mapped1, login="owner:ownerpw")
-        event = get_file_content("event1.ics")
-        self.put(os.path.join(path_mapped1, "event1.ics"), event, login="owner:ownerpw")
-
         for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            path_mapped1 = "/owner/calendar1U-" + db_type + ".ics/"
+            path_mapped2 = "/owner/calendar2U-" + db_type + ".ics/"
+            path_shared1 = "/user/calendar1U-shared-by-owner-" + db_type + ".ics/"
+
+            logging.info("\n*** prepare and test access")
+            self.mkcalendar(path_mapped1, login="owner:ownerpw")
+            event = get_file_content("event1.ics")
+            self.put(os.path.join(path_mapped1, "event1.ics"), event, login="owner:ownerpw")
+
             logging.info("\n*** test: %s", db_type)
             self.configure({"sharing": {"type": db_type}})
 
@@ -2815,6 +3247,20 @@ class TestSharingApiSanity(BaseTest):
             _, headers, answer = self.request("GET", path_shared1, check=200, login="user:userpw")
 
             # cleanup
+            logging.info("\n*** delete collection -> 409 (still in use)")
+            self.delete(path_mapped2, login="owner:ownerpw", check=409)
+
+            # delete map
+            logging.info("\n*** delete map user/owner:path_mapped2 -> ok")
+            json_dict = {}
+            json_dict['PathMapped'] = path_mapped2
+            json_dict['PathOrToken'] = path_shared1
+            _, headers, answer = self._sharing_api_json("map", "delete", check=200, login="owner:ownerpw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] == "success"
+
+            # cleanup
+            logging.info("\n*** delete collection -> 200")
             self.delete(path_mapped2, login="owner:ownerpw")
 
     def test_sharing_api_list_filter(self) -> None:
@@ -2992,24 +3438,24 @@ permissions: RrWw""")
 
         json_dict: dict
 
-        path_user1 = "/user1/calendarCCu1.ics/"
-        path_user2 = "/user2/calendarCCu2.ics/"
-        path_user1_shared1 = "/user1/calendarCCo1-shared.ics/"
-        path_user2_shared1 = "/user2/calendarCCo1-shared.ics/"
-        path_owner1 = "/owner1/calendarCCo1.ics/"
-        path_owner2 = "/owner2/calendarCCo2.ics/"
-
-        logging.info("\n*** prepare")
-        self.mkcalendar(path_owner1, login="owner1:owner1pw")
-        self.mkcalendar(path_owner2, login="owner2:owner2pw")
-        self.mkcalendar(path_user1, login="user1:user1pw")
-        self.mkcalendar(path_user2, login="user2:user2pw")
-
-        # create calendar a 2nd time
-        logging.info("\n*** mkcalendar user2 -> conflict")
-        self.mkcalendar(path_user2, login="user2:user2pw", check=409)
-
         for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            path_user1 = "/user1/calendarCCu1" + db_type + ".ics/"
+            path_user2 = "/user2/calendarCCu2" + db_type + ".ics/"
+            path_user1_shared1 = "/user1/calendarCCo1-shared" + db_type + ".ics/"
+            path_user2_shared1 = "/user2/calendarCCo1-shared" + db_type + ".ics/"
+            path_owner1 = "/owner1/calendarCCo1" + db_type + ".ics/"
+            path_owner2 = "/owner2/calendarCCo2" + db_type + ".ics/"
+
+            logging.info("\n*** prepare")
+            self.mkcalendar(path_owner1, login="owner1:owner1pw")
+            self.mkcalendar(path_owner2, login="owner2:owner2pw")
+            self.mkcalendar(path_user1, login="user1:user1pw")
+            self.mkcalendar(path_user2, login="user2:user2pw")
+
+            # create calendar a 2nd time
+            logging.info("\n*** mkcalendar user2 -> conflict")
+            self.mkcalendar(path_user2, login="user2:user2pw", check=409)
+
             logging.info("\n*** test: %s", db_type)
             self.configure({"sharing": {"type": db_type}})
 
@@ -3062,11 +3508,17 @@ permissions: RrWw""")
             # from_file
             self.configure({"rights": {"type": "from_file"}})
 
-            logging.info("\n*** mkcalendar as user1 for user2/shared1 with rights from file -> conflict")
-            self.mkcalendar(path_user2_shared1, login="user1:user1pw", check=409)
+            logging.info("\n*** mkcalendar as user2 for user2/shared1 with rights from file -> backmapped, not permitted (r/o share)")
+            self.mkcalendar(path_user2_shared1, login="user2:user2pw", check=409)
 
-            logging.info("\n*** mkcol as user1 for user2/shared1 with rights from file -> conflict")
-            self.mkcol(path_user2_shared1, login="user1:user1pw", check=409)
+            logging.info("\n*** mkcol as user2 for user2/shared1 with rights from file -> backmapped, not permitted (r/o share)")
+            self.mkcol(path_user2_shared1, login="user2:user2pw", check=409)
+
+            logging.info("\n*** mkcalendar as user1 for user2/shared1 with rights from file -> permitted as back-mapped via share")
+            self.mkcalendar(path_user2_shared1, login="user1:user1pw", check=201)
+
+            logging.info("\n*** mkcalendar as user2 for user1/shared1 with rights from file -> permitted as back-mapped via share")
+            self.mkcol(path_user1_shared1, login="user2:user2pw", check=201)
 
     def test_sharing_api_permissions_global(self) -> None:
         """sharing API usage tests related to global permissions."""
@@ -7713,6 +8165,422 @@ permissions: RrWw""")
             path_shared3_r_user = path_shared3_r.replace("{user}", "user1")
             self._proppatch_calendar_color(path_shared3_r_user, login="user1:user1pw", color="#FFFFFF", check=403)
 
+    def test_sharing_api_map_user_group_incl_self_by_local(self) -> None:
+        """share-by-map API usage tests related user group by local incl self."""
+        self.configure({"auth": {"type": "htpasswd",
+                                 "htpasswd_filename": self.htpasswd_file_path,
+                                 "htpasswd_encryption": "plain"},
+                        "group": {"type": "htgroup",
+                                  "htgroup_filename": self.htgroup_file_path},
+                        "sharing": {
+                                    "type": "csv",
+                                    "permit_create_map": "True",
+                                    "permit_create_token": "False",
+                                    "collection_by_map": "True",
+                                    "collection_by_token": "False"},
+                        "logging": {"request_header_on_debug": "False",
+                                    "response_content_on_debug": "True",
+                                    "request_content_on_debug": "True"},
+                        "rights": {"type": "owner_only"}})
+
+        json_dict: dict
+
+        logging.info("\n*** prepare and test access")
+
+        for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            logging.info("\n*** test: %s", db_type)
+            self.configure({"sharing": {"type": db_type}})
+
+            path_mapped1 = "/user1/calendarU1-" + db_type + ".ics/"
+            path_shared1_r = "/{user}/calendarU1-shared-by-user1-r-" + db_type + ".ics/"
+            path_shared_r_base = "/{user}/"
+            self.mkcalendar(path_mapped1, login="user1:user1pw")
+
+            path_mapped_addressbook = "/user1/addressbook-" + db_type + ".vcf/"
+            path_shared_bday = "/{user}/bday-" + db_type + ".ics/"
+            self.create_addressbook(path_mapped_addressbook, login="user1:user1pw")
+
+            # create map
+            logging.info("\n*** create map :group1/user1 -> success")
+            json_dict = {}
+            json_dict['User'] = ":group12"
+            json_dict['PathMapped'] = path_mapped1
+            json_dict['PathOrToken'] = path_shared1_r
+            json_dict['Permissions'] = "r"
+            json_dict['Enabled'] = True
+            json_dict['Hidden'] = False
+            _, headers, answer = self._sharing_api_json("map", "create", check=200, login="user1:user1pw", json_dict=json_dict)
+
+            # create map
+            logging.info("\n*** create map(bday) :group1/user1 -> success")
+            json_dict = {}
+            json_dict['User'] = ":group12"
+            json_dict['PathMapped'] = path_mapped_addressbook
+            json_dict['PathOrToken'] = path_shared_bday
+            json_dict['Conversion'] = "bday"
+            json_dict['Enabled'] = True
+            json_dict['Hidden'] = False
+            _, headers, answer = self._sharing_api_json("map", "create", check=200, login="user1:user1pw", json_dict=json_dict)
+
+            # verify sharing API/list as user1
+            logging.info("\n*** API list user1")
+            json_dict = {}
+            _, headers, answer = self._sharing_api_json("map", "list", check=200, login="user1:user1pw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] != "not-found"
+            assert answer_dict['Lines'] == 2
+
+            # verify sharing API/list as user2
+            logging.info("\n*** API list user2")
+            json_dict = {}
+            _, headers, answer = self._sharing_api_json("map", "list", check=200, login="user2:user2pw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] != "not-found"
+            assert answer_dict['Lines'] == 2
+
+            # verify PROPFIND as user1
+            logging.info("\n*** PROPFIND collection DEPTH=1 user1 (self-shared suppressed)")
+            path_shared_r_base_user = path_shared_r_base.replace("{user}", "user1")
+            path_shared1_r_user = path_shared1_r.replace("{user}", "user1")
+            path_shared_bday_user = path_shared_bday.replace("{user}", "user1")
+            _, responses = self.propfind(path_shared_r_base_user, """\
+<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+    <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav" />
+</propfind>""", login="user1:user1pw", HTTP_DEPTH="1")
+            assert path_shared_r_base_user in responses
+            assert path_shared1_r_user not in responses
+            assert path_mapped1 in responses
+            assert path_mapped_addressbook in responses
+            assert path_shared_bday_user in responses
+
+            # verify PROPFIND as user2
+            logging.info("\n*** PROPFIND collection DEPTH=1 user2")
+            path_shared_r_base_user = path_shared_r_base.replace("{user}", "user2")
+            path_shared1_r_user = path_shared1_r.replace("{user}", "user2")
+            path_shared_bday_user = path_shared_bday.replace("{user}", "user2")
+            _, responses = self.propfind(path_shared_r_base_user, """\
+<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+    <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav" />
+</propfind>""", login="user2:user2pw", HTTP_DEPTH="1")
+            assert path_shared_r_base_user in responses
+            assert path_shared1_r_user in responses
+            assert path_mapped1 not in responses
+            assert path_mapped_addressbook not in responses
+            assert path_shared_bday_user in responses
+
+    def test_sharing_api_map_user_group_incl_self_equal_name_bday_conflict_by_local(self) -> None:
+        """share-by-map API usage tests related user group by local incl self."""
+        self.configure({"auth": {"type": "htpasswd",
+                                 "htpasswd_filename": self.htpasswd_file_path,
+                                 "htpasswd_encryption": "plain"},
+                        "group": {"type": "htgroup",
+                                  "htgroup_filename": self.htgroup_file_path},
+                        "sharing": {
+                                    "type": "csv",
+                                    "permit_create_map": "True",
+                                    "permit_create_token": "False",
+                                    "collection_by_map": "True",
+                                    "collection_by_token": "False"},
+                        "logging": {"request_header_on_debug": "False",
+                                    "response_content_on_debug": "True",
+                                    "request_content_on_debug": "True"},
+                        "rights": {"type": "owner_only"}})
+
+        json_dict: dict
+
+        logging.info("\n*** prepare and test access")
+
+        path_mapped_contacts = "/user1/contactsGroup12.vcf/"
+        path_shared_contacts = "/{user}/contactsGroup12.vcf/"
+        path_shared_bday = "/{user}/bdayGroup12.ics/"
+        path_shared_base = "/{user}/"
+        self.create_addressbook(path_mapped_contacts, login="user1:user1pw")
+
+        for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            logging.info("\n*** test: %s", db_type)
+            self.configure({"sharing": {"type": db_type}})
+
+            # create map
+            logging.info("\n*** create map :group1/user1 -> success")
+            json_dict = {}
+            json_dict['User'] = ":group12"
+            json_dict['PathMapped'] = path_mapped_contacts
+            json_dict['PathOrToken'] = path_shared_contacts
+            json_dict['Permissions'] = "r"
+            json_dict['Enabled'] = True
+            json_dict['Hidden'] = False
+            _, headers, answer = self._sharing_api_json("map", "create", check=200, login="user1:user1pw", json_dict=json_dict)
+
+            json_dict = {}
+            json_dict['User'] = ":group12"
+            json_dict['PathMapped'] = path_mapped_contacts
+            json_dict['PathOrToken'] = path_shared_bday
+            json_dict['Conversion'] = "bday"
+            json_dict['Permissions'] = "r"
+            json_dict['Enabled'] = True
+            json_dict['Hidden'] = False
+            _, headers, answer = self._sharing_api_json("map", "create", check=200, login="user1:user1pw", json_dict=json_dict)
+
+            # verify sharing API/list as user1
+            logging.info("\n*** API list user1")
+            json_dict = {}
+            _, headers, answer = self._sharing_api_json("map", "list", check=200, login="user1:user1pw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] != "not-found"
+            assert answer_dict['Lines'] == 2
+
+            # verify sharing API/list as user2
+            logging.info("\n*** API list user2")
+            json_dict = {}
+            _, headers, answer = self._sharing_api_json("map", "list", check=200, login="user2:user2pw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] != "not-found"
+            assert answer_dict['Lines'] == 2
+
+            # verify PROPFIND as user1
+            logging.info("\n*** PROPFIND collection DEPTH=1 user1")
+            path_shared_base_user = path_shared_base.replace("{user}", "user1")
+            path_shared_contacts_user = path_shared_contacts.replace("{user}", "user1")
+            path_shared_bday_user = path_shared_bday.replace("{user}", "user1")
+            _, responses = self.propfind(path_shared_base_user, """\
+<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+    <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav" />
+</propfind>""", login="user1:user1pw", HTTP_DEPTH="1")
+            assert path_shared_base_user in responses
+            assert path_shared_contacts_user in responses
+            assert path_shared_bday_user in responses
+
+            # verify PROPFIND as user2
+            logging.info("\n*** PROPFIND collection DEPTH=1 user2")
+            path_shared_base_user = path_shared_base.replace("{user}", "user2")
+            path_shared_contacts_user = path_shared_contacts.replace("{user}", "user2")
+            path_shared_bday_user = path_shared_bday.replace("{user}", "user2")
+            _, responses = self.propfind(path_shared_base_user, """\
+<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+    <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav" />
+</propfind>""", login="user2:user2pw", HTTP_DEPTH="1")
+            assert path_shared_base_user in responses
+            assert path_shared_contacts_user in responses
+            assert path_shared_bday_user in responses
+
+            logging.info("\n*** user2 extension (collision test)")
+            path_user2_bday = "/user2/bdayGroup12.ics/"
+            path_user2_contacts = "/user2/contactsGroup12.vcf/"
+            logging.info("\n*** user2 extension, create addressbook (already shared) -> 409")
+            self.create_addressbook(path_user2_contacts, login="user2:user2pw", check=409)
+            logging.info("\n*** user2 extension, create calendar (already shared) -> 409")
+            self.mkcalendar(path_user2_bday, login="user2:user2pw", check=409)
+
+    def test_sharing_api_map_user_group_incl_self_equal_name_bday_overload_by_local(self) -> None:
+        """share-by-map API usage tests related user group by local incl self."""
+        self.configure({"auth": {"type": "htpasswd",
+                                 "htpasswd_filename": self.htpasswd_file_path,
+                                 "htpasswd_encryption": "plain"},
+                        "group": {"type": "htgroup",
+                                  "htgroup_filename": self.htgroup_file_path},
+                        "sharing": {
+                                    "type": "csv",
+                                    "permit_create_map": "True",
+                                    "permit_create_token": "False",
+                                    "collection_by_map": "True",
+                                    "collection_by_token": "False"},
+                        "logging": {"request_header_on_debug": "False",
+                                    "response_content_on_debug": "True",
+                                    "request_content_on_debug": "True"},
+                        "rights": {"type": "owner_only"}})
+
+        json_dict: dict
+
+        logging.info("\n*** prepare and test access")
+
+        path_mapped_contacts = "/user1/contactsGroup12.vcf/"
+        path_shared_contacts = "/{user}/contactsGroup12.vcf/"
+        path_shared_bday = "/{user}/bdayGroup12.ics/"
+        path_shared_base = "/{user}/"
+        self.create_addressbook(path_mapped_contacts, login="user1:user1pw")
+
+        logging.info("\n*** user2 extension (overload in advance)")
+        path_user2_bday = "/user2/bdayGroup12.ics/"
+        path_user2_contacts = "/user2/contactsGroup12.vcf/"
+        logging.info("\n*** user2 extension, create addressbook")
+        self.create_addressbook(path_user2_contacts, login="user2:user2pw")
+        logging.info("\n*** user2 extension, create calendar")
+        self.mkcalendar(path_user2_bday, login="user2:user2pw")
+
+        for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            logging.info("\n*** test: %s", db_type)
+            self.configure({"sharing": {"type": db_type}})
+
+            # create map
+            logging.info("\n*** create map :group1/user1 -> success")
+            json_dict = {}
+            json_dict['User'] = ":group12"
+            json_dict['PathMapped'] = path_mapped_contacts
+            json_dict['PathOrToken'] = path_shared_contacts
+            json_dict['Permissions'] = "r"
+            json_dict['Enabled'] = True
+            json_dict['Hidden'] = False
+            _, headers, answer = self._sharing_api_json("map", "create", check=200, login="user1:user1pw", json_dict=json_dict)
+
+            json_dict = {}
+            json_dict['User'] = ":group12"
+            json_dict['PathMapped'] = path_mapped_contacts
+            json_dict['PathOrToken'] = path_shared_bday
+            json_dict['Conversion'] = "bday"
+            json_dict['Permissions'] = "r"
+            json_dict['Enabled'] = True
+            json_dict['Hidden'] = False
+            _, headers, answer = self._sharing_api_json("map", "create", check=200, login="user1:user1pw", json_dict=json_dict)
+
+            # verify sharing API/list as user1
+            logging.info("\n*** API list user1")
+            json_dict = {}
+            _, headers, answer = self._sharing_api_json("map", "list", check=200, login="user1:user1pw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] != "not-found"
+            assert answer_dict['Lines'] == 2
+
+            # verify sharing API/list as user2
+            logging.info("\n*** API list user2")
+            json_dict = {}
+            _, headers, answer = self._sharing_api_json("map", "list", check=200, login="user2:user2pw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] != "not-found"
+            assert answer_dict['Lines'] == 2
+
+            # verify PROPFIND as user1
+            logging.info("\n*** PROPFIND collection DEPTH=1 user1")
+            path_shared_base_user = path_shared_base.replace("{user}", "user1")
+            path_shared_contacts_user = path_shared_contacts.replace("{user}", "user1")
+            path_shared_bday_user = path_shared_bday.replace("{user}", "user1")
+            _, responses = self.propfind(path_shared_base_user, """\
+<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+    <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav" />
+</propfind>""", login="user1:user1pw", HTTP_DEPTH="1")
+            assert path_shared_base_user in responses
+            assert path_shared_contacts_user in responses
+            assert path_shared_bday_user in responses
+
+            # verify PROPFIND as user2
+            logging.info("\n*** PROPFIND collection DEPTH=1 user2")
+            path_shared_base_user = path_shared_base.replace("{user}", "user2")
+            path_shared_contacts_user = path_shared_contacts.replace("{user}", "user2")
+            path_shared_bday_user = path_shared_bday.replace("{user}", "user2")
+            _, responses = self.propfind(path_shared_base_user, """\
+<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+    <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav" />
+</propfind>""", login="user2:user2pw", HTTP_DEPTH="1")
+            assert path_shared_base_user in responses
+            assert path_shared_contacts_user in responses
+            assert path_shared_bday_user in responses
+
+    def test_sharing_api_map_user_group_incl_self_equal_name_by_local(self) -> None:
+        """share-by-map API usage tests related user group by local incl self."""
+        self.configure({"auth": {"type": "htpasswd",
+                                 "htpasswd_filename": self.htpasswd_file_path,
+                                 "htpasswd_encryption": "plain"},
+                        "group": {"type": "htgroup",
+                                  "htgroup_filename": self.htgroup_file_path},
+                        "sharing": {
+                                    "type": "csv",
+                                    "permit_create_map": "True",
+                                    "permit_create_token": "False",
+                                    "collection_by_map": "True",
+                                    "collection_by_token": "False"},
+                        "logging": {"request_header_on_debug": "False",
+                                    "response_content_on_debug": "True",
+                                    "request_content_on_debug": "True"},
+                        "rights": {"type": "owner_only"}})
+
+        json_dict: dict
+
+        logging.info("\n*** prepare and test access")
+
+        path_mapped1 = "/user1/calendarGroup12.ics/"
+        path_shared1_r = "/{user}/calendarGroup12.ics/"
+        path_shared_r_base = "/{user}/"
+        self.mkcalendar(path_mapped1, login="user1:user1pw")
+
+        for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            logging.info("\n*** test: %s", db_type)
+            self.configure({"sharing": {"type": db_type}})
+
+            # create map
+            logging.info("\n*** create map :group1/user1 -> success")
+            json_dict = {}
+            json_dict['User'] = ":group12"
+            json_dict['PathMapped'] = path_mapped1
+            json_dict['PathOrToken'] = path_shared1_r
+            json_dict['Permissions'] = "r"
+            json_dict['Enabled'] = True
+            json_dict['Hidden'] = False
+            _, headers, answer = self._sharing_api_json("map", "create", check=200, login="user1:user1pw", json_dict=json_dict)
+
+            # verify sharing API/list as user1
+            logging.info("\n*** API list user1 (with placeholder)")
+            json_dict = {}
+            _, headers, answer = self._sharing_api_json("map", "list", check=200, login="user1:user1pw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] != "not-found"
+            assert answer_dict['Lines'] == 1
+            assert answer_dict['Content'][0]['PathOrToken'] == path_shared1_r
+
+            # verify sharing API/list as user2
+            logging.info("\n*** API list user2 (resolved placeholder)")
+            path_shared1_r_user = path_shared1_r.replace("{user}", "user2")
+            json_dict = {}
+            _, headers, answer = self._sharing_api_json("map", "list", check=200, login="user2:user2pw", json_dict=json_dict)
+            answer_dict = json.loads(answer)
+            assert answer_dict['Status'] != "not-found"
+            assert answer_dict['Lines'] == 1
+            assert answer_dict['Content'][0]['PathOrToken'] == path_shared1_r_user
+
+            # verify PROPFIND as user1
+            logging.info("\n*** PROPFIND collection DEPTH=1 user1")
+            path_shared_r_base_user = path_shared_r_base.replace("{user}", "user1")
+            path_shared1_r_user = path_shared1_r.replace("{user}", "user1")
+            _, responses = self.propfind(path_shared_r_base_user, """\
+<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+    <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav" />
+</propfind>""", login="user1:user1pw", HTTP_DEPTH="1")
+            assert path_shared_r_base_user in responses
+            assert path_shared1_r_user in responses
+
+            # verify PROPFIND as user1
+            logging.info("\n*** PROPFIND collection DEPTH=1 user1 (extended)")
+            path_shared_r_base_user = path_shared_r_base.replace("{user}", "user1")
+            path_shared1_r_user = path_shared1_r.replace("{user}", "user1")
+            privileges_list = self._propfind_privileges(path_shared1_r_user, login="user1:user1pw")
+            assert "D:write" in privileges_list
+            assert "D:read" in privileges_list
+
+            # verify PROPFIND as user2
+            logging.info("\n*** PROPFIND collection DEPTH=1 user2")
+            path_shared_r_base_user = path_shared_r_base.replace("{user}", "user2")
+            path_shared1_r_user = path_shared1_r.replace("{user}", "user2")
+            _, responses = self.propfind(path_shared_r_base_user, """\
+<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+    <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav" />
+</propfind>""", login="user2:user2pw", HTTP_DEPTH="1")
+            assert path_shared_r_base_user in responses
+            assert path_shared1_r_user in responses
+
+            # verify PROPFIND as user2
+            logging.info("\n*** PROPFIND collection DEPTH=1 user2 (extended)")
+            path_shared_r_base_user = path_shared_r_base.replace("{user}", "user2")
+            path_shared1_r_user = path_shared1_r.replace("{user}", "user2")
+            privileges_list = self._propfind_privileges(path_shared1_r_user, login="user2:user2pw")
+            assert "D:write" not in privileges_list
+            assert "D:read" in privileges_list
+
     def test_sharing_api_map_user_group_by_local_with_realm(self) -> None:
         """share-by-map API usage tests related user group by local with realm."""
         self.configure({"auth": {"type": "htpasswd",
@@ -8203,3 +9071,214 @@ permissions: RrWw""")
 
             json_dict['PathMapped'] = path_mapped_o2
             _, headers, answer = self._sharing_api_json("map", "create", check=409, login="owner2:owner2pw", json_dict=json_dict)
+
+    def test_sharing_api_caldav_carddav_workflow(self) -> None:
+        """Share a calendar by map and an address book by token, then use both."""
+        self.configure({"auth": {"type": "htpasswd",
+                                 "htpasswd_filename": self.htpasswd_file_path,
+                                 "htpasswd_encryption": "plain"},
+                        "sharing": {
+                                    "type": "csv",
+                                    "permit_create_map": True,
+                                    "permit_create_token": True,
+                                    "collection_by_map": "True",
+                                    "collection_by_token": "True"},
+                        "rights": {"type": "owner_only"}})
+
+        path_calendar = "/owner/coverage-calendar.ics/"
+        path_book = "/owner/coverage-contacts.vcf/"
+        path_shared = "/user/coverage-calendar.ics/"
+        self.mkcalendar(path_calendar, login="owner:ownerpw")
+        self.create_addressbook(path_book, login="owner:ownerpw")
+        for name in ("event1.ics", "todo1.ics", "journal1.ics"):
+            self.put(path_calendar + name, get_file_content(name), login="owner:ownerpw")
+        self.put(path_book + "contact1.vcf", get_file_content("contact1.vcf"), login="owner:ownerpw")
+
+        calendar_query = """\
+<?xml version="1.0" encoding="utf-8" ?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+    <D:prop>
+        <D:getetag />
+    </D:prop>
+    <C:filter>
+        <C:comp-filter name="VCALENDAR" />
+    </C:filter>
+</C:calendar-query>"""
+        addressbook_query = """\
+<?xml version="1.0" encoding="utf-8" ?>
+<C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+    <D:prop>
+        <D:getetag />
+    </D:prop>
+    <C:filter>
+        <C:prop-filter name="FN" />
+    </C:filter>
+</C:addressbook-query>"""
+
+        for db_type in list(filter(lambda item: item != "none", sharing.INTERNAL_TYPES)):
+            logging.info("\n*** workflow: %s", db_type)
+            self.configure({"sharing": {"type": db_type}})
+
+            _, _headers, answer = self._sharing_api_json("map", "create", check=200, login="owner:ownerpw", json_dict={
+                "User": "user",
+                "PathMapped": path_calendar,
+                "PathOrToken": path_shared,
+                "Permissions": "r",
+                "Enabled": True,
+                "Hidden": False,
+            })
+            assert json.loads(answer)["Status"] == "success"
+            self._sharing_api_json("map", "enable", check=200, login="user:userpw", json_dict={
+                "PathOrToken": path_shared,
+            })
+            # HiddenByUser stays set until the recipient unhides the share.
+            self._sharing_api_json("map", "unhide", check=200, login="user:userpw", json_dict={
+                "PathOrToken": path_shared,
+            })
+
+            _, _headers, answer = self._sharing_api_json("token", "create", check=200, login="owner:ownerpw", json_dict={
+                "PathMapped": path_book,
+                "Permissions": "rwp",
+                "Enabled": True,
+                "Hidden": False,
+            })
+            token = json.loads(answer)["PathOrToken"]
+            assert token.startswith("/.token/v1/")
+
+            _, responses = self.propfind("/user/", """\
+<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+    <prop>
+        <resourcetype />
+    </prop>
+</propfind>""", login="user:userpw", HTTP_DEPTH="1")
+            assert path_shared in responses
+
+            _, _headers, answer = self.request("GET", path_shared, check=200, login="user:userpw")
+            assert "UID:event1" in answer
+            assert "UID:todo" in answer
+            assert "UID:journal1" in answer
+            _, responses = self.report(path_shared, calendar_query, login="user:userpw")
+            for name in ("event1.ics", "todo1.ics", "journal1.ics"):
+                assert path_shared + name in responses
+            self.put(path_shared + "event2.ics", get_file_content("event2.ics"), check=403, login="user:userpw")
+
+            _, _headers, answer = self.request("GET", token + "contact1.vcf", check=200)
+            assert "FN:Contact" in answer
+            _, responses = self.report(token, addressbook_query)
+            assert token + "contact1.vcf" in responses
+            added_name = "contact-added-%s.vcf" % db_type
+            added = """\
+BEGIN:VCARD
+VERSION:3.0
+UID:contact-added-%s
+FN:Added %s
+N:Added;%s;;;
+END:VCARD
+""" % (db_type, db_type, db_type)
+            self.put(token + added_name, added, check=201)
+            _, _headers, answer = self.request("GET", path_book + added_name, check=200, login="owner:ownerpw")
+            assert "UID:contact-added-%s" % db_type in answer
+
+            _, _headers, answer = self._sharing_api_json("map", "list", check=200, login="owner:ownerpw", json_dict={})
+            listed = json.loads(answer)
+            assert listed["Lines"] == 1
+            assert listed["Content"][0]["PathOrToken"] == path_shared
+            _, _headers, answer = self._sharing_api_json("token", "list", check=200, login="owner:ownerpw", json_dict={})
+            listed = json.loads(answer)
+            assert listed["Lines"] == 1
+            assert listed["Content"][0]["PathOrToken"] == token
+
+            if db_type == "files":
+                map_dir = os.path.join(self.colpath, "collection-db", "files", "map")
+                os.mkdir(os.path.join(map_dir, "ignored-dir"))
+                with open(os.path.join(map_dir, "bad-version"), "wb") as handle:
+                    pickle.dump(("9", {"ShareType": "map"}), handle)
+                _, _headers, answer = self._sharing_api_json("map", "list", check=200, login="owner:ownerpw", json_dict={})
+                assert json.loads(answer)["Lines"] == 1
+
+            self._sharing_api_json("map", "delete", check=200, login="owner:ownerpw", json_dict={
+                "User": "user",
+                "PathMapped": path_calendar,
+                "PathOrToken": path_shared,
+            })
+            self.request("GET", path_shared, check=404, login="user:userpw")
+            self._sharing_api_json("token", "delete", check=200, login="owner:ownerpw", json_dict={
+                "PathOrToken": token,
+            })
+            self.request("GET", token, check=403)
+
+    def _sharing_csv_path(self) -> str:
+        return os.path.join(self.colpath, "collection-db", "sharing.csv")
+
+    def _sharing_csv_rows(self) -> list:
+        with open(self._sharing_csv_path(), newline="", encoding="utf-8") as handle:
+            return list(csv.reader(handle, delimiter=";"))
+
+    def _write_sharing_csv_rows(self, rows: list) -> None:
+        with open(self._sharing_csv_path(), "w", newline="", encoding="utf-8") as handle:
+            csv.writer(handle, delimiter=";").writerows(rows)
+
+    def _expect_sharing_disabled(self) -> None:
+        self.configure({"sharing": {"type": "csv", "database_path": ""}})
+        self._sharing_api_json("all", "info", check=404, login="owner:ownerpw", json_dict={})
+
+    def test_sharing_csv_rejects_corrupt_database(self) -> None:
+        """A corrupt CSV sharing database disables sharing instead of crashing."""
+        self.configure({"auth": {"type": "htpasswd",
+                                 "htpasswd_filename": self.htpasswd_file_path,
+                                 "htpasswd_encryption": "plain"},
+                        "sharing": {
+                                    "type": "csv",
+                                    "database_path": "",
+                                    "permit_create_map": True,
+                                    "permit_create_token": True,
+                                    "collection_by_map": "True",
+                                    "collection_by_token": "True"},
+                        "rights": {"type": "owner_only"}})
+        self._sharing_api_json("all", "info", check=200, login="owner:ownerpw", json_dict={})
+        path_calendar = "/owner/corrupt-calendar.ics/"
+        path_shared = "/user/corrupt-calendar.ics/"
+        self.mkcalendar(path_calendar, login="owner:ownerpw")
+        _, _headers, answer = self._sharing_api_json("map", "create", check=200, login="owner:ownerpw", json_dict={
+            "User": "user",
+            "PathMapped": path_calendar,
+            "PathOrToken": path_shared,
+            "Permissions": "r",
+            "Enabled": True,
+            "Hidden": False,
+        })
+        assert json.loads(answer)["Status"] == "success"
+
+        original = self._sharing_csv_rows()
+        assert len(original) >= 2
+        header = original[0]
+        data = original[1]
+        assert "EnabledByOwner" in header
+        assert "TimestampCreated" in header
+        assert "Properties" in header
+
+        def disabled_copy() -> list:
+            return [list(header), list(data)]
+
+        bad_bool = disabled_copy()
+        bad_bool[1][header.index("EnabledByOwner")] = "maybe"
+        bad_int = disabled_copy()
+        bad_int[1][header.index("TimestampCreated")] = "abc"
+        bad_json = disabled_copy()
+        bad_json[1][header.index("Properties")] = "{bad"
+        duplicate = disabled_copy()
+        duplicate.append(list(data))
+        extra = disabled_copy()
+        extra[1].append("oops")
+        for rows in (bad_bool, bad_int, bad_json, duplicate, extra):
+            self._write_sharing_csv_rows(rows)
+            self._expect_sharing_disabled()
+
+        os.remove(self._sharing_csv_path())
+        os.mkdir(self._sharing_csv_path())
+        self._expect_sharing_disabled()
+
+        missing = os.path.join(self.colpath, "missing-parent", "nested", "sharing.csv")
+        self.configure({"sharing": {"type": "csv", "database_path": missing}})
+        self._sharing_api_json("all", "info", check=404, login="owner:ownerpw", json_dict={})

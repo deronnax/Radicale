@@ -193,11 +193,13 @@ class ApplicationPartPut(ApplicationBase):
                 user_lookup += sharing.SHARING_SEPARATOR_GROUP + ','.join(self._rights._user_groups)
             share = self._sharing.sharing_collection_resolver(path, user_lookup)
             if share:
-                # overwrite and run through extended permission check
-                path = share['PathMapped']
-                user = share['Owner']
-                permissions_filter = share['Permissions']
-                access = Access(self._rights, user, path, permissions_filter)
+                if path != share['PathMapped']:
+                    # overwrite and run through extended permission check
+                    path = share['PathMapped']
+                    user = share['Owner']
+                    permissions_filter = share['Permissions']
+                else:
+                    logger.trace("PUT/shares: skip overlap mapping: path=%r", path)
         access = Access(self._rights, user, path, permissions_filter)
         if not access.check("w"):
             return httputils.NOT_ALLOWED
@@ -218,7 +220,8 @@ class ApplicationPartPut(ApplicationBase):
             logger.warning(
                 "Bad PUT request on %r (read_components using vobject): %s", path, e, exc_info=True)
             if self._log_bad_put_request_content:
-                logger.warning("Bad PUT request content of %r:\n%s", path, utils.textwrap_str(content))
+                if logger.isEnabledFor(logging.WARNING):
+                    logger.warning("Bad PUT request content of %r:\n%s", path, utils.textwrap_str(content))
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug("Request content (sha256sum): %s", utils.sha256_str(content))
                     logger.debug("Request content (hexdump/lines):\n%s", utils.hexdump_lines(content))

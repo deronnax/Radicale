@@ -45,7 +45,7 @@ from radicale import config, httputils, log, pathutils, types, utils
 from radicale.app import base as app_base
 from radicale.app.base import ApplicationBase
 from radicale.app.delete import ApplicationPartDelete
-from radicale.app.get import ApplicationPartGet
+from radicale.app.get import ApplicationPartGet, requests_freebusy_view
 from radicale.app.head import ApplicationPartHead
 from radicale.app.mkcalendar import ApplicationPartMkcalendar
 from radicale.app.mkcol import ApplicationPartMkcol
@@ -305,7 +305,8 @@ class Application(ApplicationPartDelete, ApplicationPartHead,
                                     condition=self._response_content_on_notice_condition,
                                     value=request_info,
                                     ):
-                                logger.notice("Response content (nonXML, log condition passed):\n%s", utils.textwrap_str(answer, self._limit_content))
+                                if logger.isEnabledFor(log.LOG_LEVEL_NOTICE):
+                                    logger.notice("Response content (nonXML, log condition passed):\n%s", utils.textwrap_str(answer, self._limit_content))
                         else:
                             if logger.isEnabledFor(logging.DEBUG):
                                 logger.debug("Response content: suppressed by config/option [logging] response_content_on_debug")
@@ -340,7 +341,8 @@ class Application(ApplicationPartDelete, ApplicationPartHead,
                             condition=self._response_header_on_notice_condition,
                             value=request_info,
                             ):
-                        logger.notice("Response header (log condition passed):\n%s", utils.textwrap_str(pprint.pformat(headers), self._limit_content))
+                        if logger.isEnabledFor(log.LOG_LEVEL_NOTICE):
+                            logger.notice("Response header (log condition passed):\n%s", utils.textwrap_str(pprint.pformat(headers), self._limit_content))
                 else:
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug("Response header: suppressed by config/option [logging] response_header_on_debug")
@@ -474,8 +476,9 @@ class Application(ApplicationPartDelete, ApplicationPartHead,
                     request_method, unsafe_path, depthinfo,
                     remote_host, remote_useragent_txt, https_info)
         if self._request_header_on_debug:
-            logger.debug("Request header:\n%s",
-                         utils.textwrap_str(pprint.pformat(self._scrub_headers(environ)), self._limit_content))
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Request header:\n%s",
+                             utils.textwrap_str(pprint.pformat(self._scrub_headers(environ)), self._limit_content))
         else:
             if not self._request_header_on_notice_condition != {}:
                 # conditional request header logging is later
@@ -570,7 +573,8 @@ class Application(ApplicationPartDelete, ApplicationPartHead,
                     condition=self._request_header_on_notice_condition,
                     value=request_info,
                     ):
-                logger.notice("Request header (log condition passed):\n%s", utils.textwrap_str(pprint.pformat(self._scrub_headers(environ)), self._limit_content))
+                if logger.isEnabledFor(log.LOG_LEVEL_NOTICE):
+                    logger.notice("Request header (log condition passed):\n%s", utils.textwrap_str(pprint.pformat(self._scrub_headers(environ)), self._limit_content))
 
         if user and login == user:
             logger.info("Successful login: %r (%s)", user, info)
@@ -668,8 +672,12 @@ class Application(ApplicationPartDelete, ApplicationPartHead,
                     profiler_active = True
 
             try:
-                status, headers, answer, xml_request = function(
-                    environ, base_prefix, path, user, request_info)
+                if (requests_freebusy_view(environ) and
+                        request_method not in ("GET", "HEAD")):
+                    status, headers, answer, xml_request = httputils.METHOD_NOT_ALLOWED
+                else:
+                    status, headers, answer, xml_request = function(
+                        environ, base_prefix, path, user, request_info)
             except PermissionError as e:
                 logger.error("PermissionError: %s", e)
                 status, headers, answer, xml_request = httputils.INTERNAL_SERVER_ERROR

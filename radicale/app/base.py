@@ -215,7 +215,8 @@ class ApplicationBase:
                         condition=self._request_content_on_notice_condition,
                         value=request_info,
                         ):
-                    logger.notice("Request content (XML, log condition passed):\n%s", utils.textwrap_str(xmlutils.pretty_xml(xml_content)))
+                    if logger.isEnabledFor(log.LOG_LEVEL_NOTICE):
+                        logger.notice("Request content (XML, log condition passed):\n%s", utils.textwrap_str(xmlutils.pretty_xml(xml_content)))
                 else:
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug("Request content (XML, log condition skipped): suppressed")
@@ -236,7 +237,8 @@ class ApplicationBase:
                         condition=self._response_content_on_notice_condition,
                         value=request_info,
                         ):
-                    logger.notice("Response content (XML, log condition passed):\n%s", utils.textwrap_str(xmlutils.pretty_xml(xml_content)))
+                    if logger.isEnabledFor(log.LOG_LEVEL_NOTICE):
+                        logger.notice("Response content (XML, log condition passed):\n%s", utils.textwrap_str(xmlutils.pretty_xml(xml_content)))
                 else:
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug("Response content (XML, log condition skipped): suppressed")
@@ -253,6 +255,12 @@ class ApplicationBase:
         headers = {"Content-Type": "text/xml; charset=%s" % self._encoding}
         content = self._xml_response(xmlutils.webdav_error(human_tag), request_info)
         return status, headers, content, None
+
+
+def _with_implied_freebusy(permissions: str) -> str:
+    if "r" in permissions and "f" not in permissions:
+        return permissions + "f"
+    return permissions
 
 
 class Access:
@@ -275,8 +283,8 @@ class Access:
         self.permissions = self._rights.authorization(self.user, self.path)
         if permissions_filter is not None:
             self._permissions_filter = permissions_filter
-            permissions_filtered = intersect(self.permissions, permissions_filter)
-            self.permissions = permissions_filtered
+            self.permissions = intersect(
+                _with_implied_freebusy(self.permissions), permissions_filter)
         self._parent_permissions = None
 
     @property
@@ -287,8 +295,9 @@ class Access:
             self._parent_permissions = self._rights.authorization(
                 self.user, self.parent_path)
         if self._permissions_filter is not None:
-            parent_permissions_filtered = intersect(self._parent_permissions, self._permissions_filter)
-            self._parent_permissions = parent_permissions_filtered
+            self._parent_permissions = intersect(
+                _with_implied_freebusy(self._parent_permissions),
+                self._permissions_filter)
         return self._parent_permissions
 
     def check(self, permission: str,
@@ -310,3 +319,11 @@ class Access:
         return bool(rights.intersect(self.permissions, permissions) or (
             self.path != self.parent_path and
             rights.intersect(self.parent_permissions, parent_permissions)))
+
+    def allows_freebusy(self, item: Optional[types.CollectionOrItem] = None
+                        ) -> bool:
+        if item is not None and (
+                not isinstance(item, storage.BaseCollection) or
+                item.tag != "VCALENDAR"):
+            return False
+        return "r" in self.permissions or "f" in self.permissions

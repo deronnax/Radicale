@@ -26,7 +26,7 @@ import { Collection, CollectionType, Permission } from "../models/collection.js"
 import { extract_title } from "../utils/collection_utils.js";
 import { collectionsCache } from "../utils/collections_cache.js";
 import { ErrorHandler } from "../utils/error.js";
-import { bytesToHumanReadable, get_element, get_element_by_id } from "../utils/misc.js";
+import { bytesToHumanReadable, decode_and_strip_trailing_slashes, get_element, get_element_by_id, strip_leading_slashes, strip_trailing_slashes } from "../utils/misc.js";
 import { displayPermissions } from "../utils/permissions.js";
 import { UrlTextHandler } from "../utils/url_text.js";
 import { CreateEditCollectionScene } from "./CreateEditCollectionScene.js";
@@ -40,15 +40,17 @@ import { UploadCollectionScene } from "./UploadCollectionScene.js";
  * Finds a matching map share for a given collection href and current user.
  * @param {string} collectionHref
  * @param {import("../api/sharing.js").Share[]} shares
- * @param {string} currentUser
  * @returns {import("../api/sharing.js").Share | undefined}
  */
-function find_matching_map_share(collectionHref, shares, currentUser) {
-    let collHref = decodeURIComponent(collectionHref || "").replace(/\/+$/, "");
-    let cleanUser = decodeURIComponent(currentUser || "");
+function find_matching_map_share(collectionHref, shares) {
+    let collHref = decode_and_strip_trailing_slashes(collectionHref);
     return (shares || []).find(s => {
         if (s.ShareType !== "map") return false;
-        let shareTarget = decodeURIComponent(s.PathOrToken || "").replace("{user}", cleanUser).replace(/\/+$/, "");
+        let shareMapped = decode_and_strip_trailing_slashes(s.PathMapped);
+        if (collHref === shareMapped || collHref.endsWith("/" + strip_leading_slashes(shareMapped))) {
+            return false;
+        }
+        let shareTarget = decode_and_strip_trailing_slashes(s.PathOrToken);
         return collHref === shareTarget || collHref.endsWith(shareTarget);
     });
 }
@@ -161,8 +163,8 @@ export class CollectionsScene {
      */
     _sort_collections(collections, shares) {
         collections.sort((a, b) => {
-            const shareA = find_matching_map_share(a.href, shares, this._user);
-            const shareB = find_matching_map_share(b.href, shares, this._user);
+            const shareA = find_matching_map_share(a.href, shares);
+            const shareB = find_matching_map_share(b.href, shares);
 
             const ownedA = !shareA || shareA.Owner === this._user;
             const ownedB = !shareB || shareB.Owner === this._user;
@@ -254,6 +256,9 @@ export class CollectionsScene {
         /** @type {HTMLElement} */ let share_btn = get_element(node, "[data-name=share]");
         /** @type {HTMLAnchorElement} */ let download_btn = /** @type {HTMLAnchorElement} */ (get_element(node, "[data-name=download]"));
         /** @type {HTMLButtonElement} */ let copy_btn = /** @type {HTMLButtonElement} */ (get_element(node, "[data-name=copy-url]"));
+        /** @type {HTMLElement} */ let freebusy_wrapper = get_element(node, "[data-name=freebusy-url-wrapper]");
+        /** @type {HTMLInputElement} */ let freebusy_url_form = /** @type {HTMLInputElement} */ (get_element(node, "[data-name=freebusy-url]"));
+        /** @type {HTMLButtonElement} */ let freebusy_copy_btn = /** @type {HTMLButtonElement} */ (get_element(node, "[data-name=copy-freebusy-url]"));
         /** @type {HTMLElement} */ let permissions_container = get_element(node, "[data-name=permissions]");
         /** @type {HTMLElement} */ let share_option = get_element(node, "[data-name=shareoption]");
         if (collection.color) {
@@ -290,7 +295,7 @@ export class CollectionsScene {
 
         let share_info = get_element(node, "[data-name=shared-by]");
         let transformed_from = get_element(node, "[data-name=transformed-from]");
-        let share = find_matching_map_share(collection.href, shares, this._user);
+        let share = find_matching_map_share(collection.href, shares);
         if (share) {
             if (share.Owner !== this._user) {
                 share_info.classList.remove("hidden");
@@ -337,10 +342,18 @@ export class CollectionsScene {
         }
         let href = window.location.origin + collection.href;
         new UrlTextHandler(url_form, copy_btn).setHref(href);
+        let bday_transform = Boolean(share &&
+            (share.Conversion || "").toLowerCase() === "bday");
+        if (CollectionType.is_subset(CollectionType.CALENDAR, collection.type) &&
+                !bday_transform) {
+            freebusy_wrapper.classList.remove("hidden");
+            new UrlTextHandler(freebusy_url_form, freebusy_copy_btn).setHref(
+                href + "?view=freebusy");
+        }
         download_btn.href = href;
         download_btn.onclick = (event) => {
             event.preventDefault();
-            let fallback = (collection.displayname || collection.href).replace(/\/+$/, "") + (collection.type === CollectionType.ADDRESSBOOK ? ".vcf" : ".ics");
+            let fallback = strip_trailing_slashes(collection.displayname || collection.href) + (collection.type === CollectionType.ADDRESSBOOK ? ".vcf" : ".ics");
             this._download_file(href, fallback);
         };
         if (collection.type == CollectionType.WEBCAL) {
@@ -370,7 +383,7 @@ export class CollectionsScene {
         }
 
         let visible_collections = collections.filter((collection) => {
-            let share = find_matching_map_share(collection.href, shares, this._user);
+            let share = find_matching_map_share(collection.href, shares);
             if (share && share.Owner === this._user) {
                 let conversion = (share.Conversion || "").toLowerCase();
                 if (conversion === "none" || conversion === "") {

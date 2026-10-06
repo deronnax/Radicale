@@ -11,6 +11,7 @@ With _3.7.0_ major extension was implemented
 With _3.8.0_ sharing-by-* membership was implemented
  * sharing-by-group
  * sharing-by-realm
+ * precedence: native user collection over (resolved) shared collection in case of same URI
 
 ## Sharing Implementation
 
@@ -97,6 +98,11 @@ Dedicated configured share for a specific user overrules a share-by-group/realm 
     * `user` by `Owner`
   * Activate
     * `permissions_filter` by `Permissions`
+
+##### CxDav request "DELETE" collection
+
+- (resolved) target collection: rejected by error 403
+- source collection with still existing map or token: rejected by error 409
 
 #### CxDav request "REPORT"
 
@@ -225,6 +231,22 @@ Note: requests to not enabled or not even defined tokens will result in _401 Not
 * enable token as owner (can be combined with "create")
 * handover URI with token to client
 
+#### Free/busy view
+
+`GET` and `HEAD` with `?view=freebusy` return the read-only free/busy
+calendar when the token permissions include `r` or `f`.
+
+A token can skip that query. Set Actions config `view` to `freebusy`:
+
+```json
+"Actions": { "config": { "view": "freebusy" } }
+```
+
+Plain `GET` and `HEAD` then return the same free/busy calendar.
+`start` and `end` still select the window. Another `view` value is
+rejected. Other methods keep the token permissions. Removing the
+setting uses the value `#DEL#`.
+
 ## Sharing Configuration Management API version 1
 
 Type: POST API
@@ -285,7 +307,7 @@ PermittedCreateCollectionByToken=True
 SupportedConversions=(bday none)
 PermittedPropertiesOverlay=True
 SupportedPropertiesOverlay=(C:calendar-description ICAL:calendar-color CR:addressbook-description INF:addressbook-color D:displayname ICAL:calendar-order)
-SupportedActions='{'config': {'conversion_bday_summary_template': 'str', 'conversion_bday_description_template': 'str', 'conversion_bday_alarm_trigger_template': 'str', 'conversion_bday_categories': 'str', 'conversion_bday_age_max': 'int'}}'
+SupportedActions='{'config': {'conversion_bday_summary_template': 'str', 'conversion_bday_description_template': 'str', 'conversion_bday_alarm_trigger_template': 'str', 'conversion_bday_categories': 'str', 'conversion_bday_age_max': 'int', 'view': 'str'}}'
 ```
 
 ###### json->json, parsed with jq
@@ -319,7 +341,8 @@ curl -u user:$userpw --silent -H "accept: application/json" -d "" http://localho
       "conversion_bday_description_template": "str",
       "conversion_bday_alarm_trigger_template": "str",
       "conversion_bday_categories": "str",
-      "conversion_bday_age_max": "int"
+      "conversion_bday_age_max": "int",
+      "view": "str"
     }
   }
 }

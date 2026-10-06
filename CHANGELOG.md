@@ -1,11 +1,29 @@
 # Changelog
 
-## 3.8.2.dev
+## 3.8.3.dev
+
+## 3.8.2
+* Add: tests: sharing API plus CalDAV/CardDAV workflow and corrupt CSV handling (covers #2259)
+* Add: tests: mocked LDAP, IMAP, OAuth2 and PAM authentication servers (covers #2259)
+* Improve: storage hook: avoid using preexc_fn, use process_group
+* Add: sharing/token: plain GET and HEAD serve free/busy when Actions config `view` is `freebusy`
+* Add: WebUI read-only free/busy calendar URL under each calendar
+* Add: read-only free/busy view via GET ?view=freebusy
+* Fix: free-busy REPORT returns one VFREEBUSY with FREEBUSY periods and no event details (RFC 4791)
+* Add: rights permission `f` to read free-busy time without event details
+* Fix: free-busy REPORT does not expand transparent recurrences
 * Fix: sharing/bday-conversion: add proper RRULE and RECURRENCE-ID in case of "age" support is triggered
 * Fix: sharing/bday-conversion: do not serve item.vcf in parallel of item.ics
 * Fix: sharing/bday-conversion: adjust etag depending on template (item) or content (collection)
 * Fix: sharing/propfind: remove unexpected additional shares listed in case of request on collection with HTTP_DEPTH=1
 * Add: sharing/bday-conversion: X-RADICALE-NAME to generated bday items
+* Fix: sharing/propfind: suppress (resolved) shares having same URI as native ones
+* Fix: sharing/mkcol+mkcalendar: detect conflict with existing resolved shares
+* Fix: WebUI/sharing: display permissions and share-by-group
+* Performance: guard expensive logging with isEnabledFor (where missed)
+* Performance: use lazy formatting for logger calls (where missed)
+* Fix: delete/sharing: neither allow resolved share nor still mapped collections to be deleted
+* Fix: sharing: resolved share resulting in same path as original requested will not have precedence
 
 ## 3.8.1
 * Add: tests: optional caldav-server-tester based CalDAV compatibility test suite (caldav_compat_tests)

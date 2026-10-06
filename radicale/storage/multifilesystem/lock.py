@@ -24,7 +24,7 @@ import shlex
 import signal
 import subprocess
 import sys
-from typing import Iterator
+from typing import Any, Iterator
 
 from radicale import config, pathutils, types
 from radicale.log import logger
@@ -42,7 +42,7 @@ class CollectionPartLock(CollectionBase):
         self._storage._makedirs_synced(cache_folder)
         lock_path = os.path.join(cache_folder,
                                  ".Radicale.lock" + (".%s" % ns if ns else ""))
-        logger.debug("Lock file (CollectionPartLock): %r" % lock_path)
+        logger.debug("Lock file (CollectionPartLock): %r", lock_path)
         lock = pathutils.RwLock(lock_path)
         with lock.acquire("w"):
             yield
@@ -56,7 +56,7 @@ class StoragePartLock(StorageBase):
     def __init__(self, configuration: config.Configuration) -> None:
         super().__init__(configuration)
         lock_path = os.path.join(self._filesystem_folder, ".Radicale.lock")
-        logger.debug("Lock file (StoragePartLock): %r" % lock_path)
+        logger.debug("Lock file (StoragePartLock): %r", lock_path)
         self._lock = pathutils.RwLock(lock_path)
         self._hook = configuration.get("storage", "hook")
 
@@ -69,13 +69,17 @@ class StoragePartLock(StorageBase):
                 debug = logger.isEnabledFor(logging.DEBUG)
                 # Use new process group for child to prevent terminals
                 # from sending SIGINT etc.
-                preexec_fn = None
-                creationflags = 0
+
+                popen_kwargs: dict[str, Any] = {}
                 if sys.platform == "win32":
-                    creationflags |= subprocess.CREATE_NEW_PROCESS_GROUP
-                else:
+                    popen_kwargs["creationflags"] = (
+                        subprocess.CREATE_NEW_PROCESS_GROUP)
+                elif sys.version_info < (3, 11):
                     # Process group is also used to identify child processes
-                    preexec_fn = os.setpgrp
+                    popen_kwargs["preexec_fn"] = os.setpgrp
+                else:
+                    popen_kwargs["process_group"] = 0
+
                 # optional argument
                 path = kwargs.get('path', "")
                 request = kwargs.get('request', "NONE")
@@ -90,25 +94,34 @@ class StoragePartLock(StorageBase):
                         "request": shlex.quote(request),
                         "user": shlex.quote(user or "Anonymous")}
                 except KeyError as e:
-                    logger.error("Storage hook contains not supported placeholder %s (skip execution of: %r)" % (e, self._hook))
+                    logger.error(
+                        "Storage hook contains not supported placeholder %s "
+                        "(skip execution of: %r)",
+                        e, self._hook)
                     return
 
-                logger.debug("Executing storage hook: '%s'" % command)
+                logger.debug("Executing storage hook: '%s'", command)
                 try:
                     p = subprocess.Popen(
-                        command, stdin=subprocess.DEVNULL,
+                        command,
+                        stdin=subprocess.DEVNULL,
                         stdout=subprocess.PIPE if debug else subprocess.DEVNULL,
                         stderr=subprocess.PIPE if debug else subprocess.DEVNULL,
-                        shell=True, universal_newlines=True, preexec_fn=preexec_fn,
-                        cwd=self._filesystem_folder, creationflags=creationflags)
+                        shell=True, text=True, cwd=self._filesystem_folder,
+                        **popen_kwargs)
                 except Exception as e:
-                    logger.error("Execution of storage hook not successful on 'Popen': %s" % e)
+                    logger.error(
+                        "Execution of storage hook not successful on 'Popen': %s",
+                        e)
                     return
                 logger.debug("Executing storage hook started 'Popen'")
                 try:
                     stdout_data, stderr_data = p.communicate()
                 except BaseException as e:  # e.g. KeyboardInterrupt or SystemExit
-                    logger.error("Execution of storage hook not successful on 'communicate': %s" % e)
+                    logger.error(
+                        "Execution of storage hook not successful on "
+                        "'communicate': %s",
+                        e)
                     p.kill()
                     p.wait()
                     return
@@ -123,5 +136,7 @@ class StoragePartLock(StorageBase):
                 if stderr_data:
                     logger.debug("Captured stderr from storage hook:\n%s", stderr_data)
                 if p.returncode != 0:
-                    logger.error("Execution of storage hook not successful: %s" % subprocess.CalledProcessError(p.returncode, p.args))
+                    logger.error(
+                        "Execution of storage hook not successful: %s",
+                        subprocess.CalledProcessError(p.returncode, p.args))
                     return

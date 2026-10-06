@@ -2269,6 +2269,35 @@ is thrown instead of returning the results.
 
 Default: 10000
 
+##### freebusy_view_past_days
+
+_(>= 3.8.2)_
+
+Number of days before today included in the default window of the
+read-only free/busy view (`GET` or `HEAD` with `?view=freebusy`). The
+window starts at midnight UTC. `0` starts the window at midnight UTC
+today. A request that provides both `start` and `end`
+(`YYYYMMDDTHHMMSSZ`) overrides this default and
+`freebusy_view_future_days`.
+
+Default: 365
+
+##### freebusy_view_future_days
+
+_(>= 3.8.2)_
+
+Number of days after today included in the default window of the
+read-only free/busy view. The window ends at midnight UTC that many
+days ahead. `0` ends the window at midnight UTC today.
+
+Default: 365
+
+A share-by-token can omit `?view=freebusy`. Set that token's Actions
+config `view` to `freebusy`. Plain `GET` and `HEAD` of the token then
+use this view, including an optional `start` and `end`. Any other
+`view` value is rejected. Other methods keep the token permissions.
+See [Collection Sharing](https://github.com/Kozea/Radicale/blob/master/SHARING.md).
+
 #### [sharing]
 
 _(>= 3.7.0)_
@@ -2370,7 +2399,7 @@ Default permissions for create token-based sharing
 
 Default: `r`
 
-Supported: `rwEePp`
+Supported: `rfwEePp`
 
 ##### default_permissions_create_map
 
@@ -2380,7 +2409,7 @@ Default permissions for map-based sharing
 
 Default: `r`
 
-Supported: `rwEePp`
+Supported: `rfwEePp`
 
 ##### conversion_bday_summary_template
 
@@ -2388,7 +2417,7 @@ _(>= 3.7.5)_
 
 Global template for summary of conversion "bday"
 
-Default: `{{n:f} {n:g}|{fn}|{nickname}} ({year}) (BDAY)`
+Default: `[{n:f} {n:g}|{fn}|{nickname}] ({year}) (BDAY)`
 
 Supported placeholders (data used from VCARD)
  * `{year}`: year of birthday (RFC6350#6.2.5)
@@ -2677,6 +2706,8 @@ The following `permissions` are recognized:
 * **r:** read address book and calendar collections
 * **i:** subset of **r** that only allows direct access via HTTP method GET
   (CalDAV/CardDAV is susceptible to expensive search requests)
+* **f:** read the free-busy time of a calendar, without event details
+  (**r** includes this)
 * **W:** write collections (excluding address books and calendars)
 * **w:** write address book and calendar collections
 * **D:** allow deleting a collection in case `permit_delete_collection=False` _(>= 3.3.0)_
@@ -3114,6 +3145,35 @@ Here are the steps to install Radicale via Docker Compose:
     ```bash
     $ docker compose down
     ```
+
+##### Environment variables for a default user
+
+The official Docker image can create an `htpasswd` user on first startup when
+no users file exists yet. This is intended for quick self-hosted setups; for
+production, mount a configuration file and users file instead.
+
+| Variable | Description |
+| --- | --- |
+| `RADICALE_USER` | Login name for the default user |
+| `RADICALE_PASSWORD` or `RADICALE_PASS` | Password for that user |
+| `RADICALE_HTPASSWD_FILENAME` | Optional path to the users file (default: `/etc/radicale/users`) |
+
+If `RADICALE_USER` and a password variable are set and the users file does not
+exist yet, the entrypoint creates it with a bcrypt hash. If
+`/etc/radicale/config` is also missing, a minimal configuration is written that
+enables `htpasswd` authentication. Existing users or configuration files are
+left unchanged.
+
+Example:
+
+```yaml
+environment:
+  RADICALE_USER: admin
+  RADICALE_PASSWORD: change-me
+```
+
+Mount persistent volumes for `/etc/radicale` and `/var/lib/radicale` so users,
+configuration, and calendar data survive container recreation.
 
 ##### Available tags
 
